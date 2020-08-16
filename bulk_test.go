@@ -20,6 +20,92 @@ func TestSparseMerkleTree(t *testing.T) {
 	}
 }
 
+func BenchmarkInsertsAndUpdates(b *testing.B) {
+	tests := []struct {
+		name             string
+		initialLeavesNum int
+		minKeySize       int
+		maxKeySize       int
+		minValSize       int
+		maxValSize       int
+		numUpdates       int
+	}{
+		{"Insert 100 into empty", 0, 16, 32, 1, 64, 100},
+		{"Insert 1000 into empty", 0, 16, 32, 1, 64, 1000},
+		{"Insert 10000 into empty", 0, 16, 32, 1, 64, 10000},
+		{"Insert 50000 into empty", 0, 16, 32, 1, 64, 50000},
+		{"Insert 100000 into empty", 0, 16, 32, 1, 64, 100000},
+		{"Update 1000 of 1000 leaves (all)", 1000, 16, 32, 1, 64, 1000},
+		{"Update 1000 of 100000 leaves", 100000, 16, 32, 1, 64, 1000},
+		{"Update 10000 of 100000 leaves", 100000, 16, 32, 1, 64, 10000},
+		{"Update 50000 of 100000 leaves", 100000, 16, 32, 1, 64, 50000},
+		{"update 100000 of 100000 leaves (all)", 100000, 16, 32, 1, 64, 100000},
+	}
+	for _, tt := range tests {
+		b.Run(tt.name, func(t *testing.B) {
+			// setup:
+			sm := NewSimpleMap()
+			smt := NewSparseMerkleTree(sm, sha256.New())
+			initKeys, vals := generateKeyVals(tt.minKeySize, tt.maxKeySize, tt.minValSize, tt.maxValSize, tt.initialLeavesNum)
+			for i := 0; i < tt.initialLeavesNum; i++ {
+				_, err := smt.Update(initKeys[i], vals[i])
+				if err != nil {
+					t.Errorf("Update() unxepected error = %v", err)
+					return
+				}
+			}
+
+			keys, vals := generateKeyVals(tt.minKeySize, tt.maxKeySize, tt.minValSize, tt.maxValSize, tt.numUpdates)
+
+			b.ResetTimer()
+			// benchmark numUpdates updates:
+			for i := 0; i < b.N; i++ {
+				for u := 0; u < tt.numUpdates; u++ {
+					b.StopTimer()
+					var key, val []byte
+					// always use new val:
+					val = vals[u]
+					// re-use a key (update) if possible, else insert
+					if u < tt.initialLeavesNum {
+						key = initKeys[u]
+					} else {
+						key = keys[u]
+					}
+					b.StartTimer()
+					_, err := smt.Update(key, val)
+					if err != nil {
+						t.Errorf("Update() unxepected error = %v", err)
+						return
+					}
+				}
+			}
+		})
+	}
+}
+
+func generateKeyVals(
+	minKeySize int,
+	maxKeySize int,
+	minValSize int,
+	maxValSize int,
+	numLeafs int,
+) ([][]byte, [][]byte) {
+	keys, vals := make([][]byte, numLeafs), make([][]byte, numLeafs)
+	for u := 0; u < numLeafs; u++ {
+		keys[u] = randBlob(minKeySize, maxKeySize)
+		vals[u] = randBlob(minValSize, maxValSize)
+	}
+	return keys, vals
+}
+
+// generate random bytes with minSize <= num of bytes <= maxSize:
+func randBlob(minSize int, maxSize int) []byte {
+	keyLen := minSize + rand.Intn(maxSize)
+	key := make([]byte, keyLen)
+	rand.Read(key)
+	return key
+}
+
 // Test all tree operations in bulk, with specified ratio probabilities of insert, update and delete.
 func bulkOperations(t *testing.T, operations int, insert int, update int, delete int) {
 	sm := NewSimpleMap()
